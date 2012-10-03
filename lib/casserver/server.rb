@@ -301,7 +301,9 @@ module CASServer
         @template_engine = @template_engine.to_sym
       end
     end
-
+    after do
+      ActiveRecord::Base.connection_pool.release_connection
+    end
     # The #.#.# comments (e.g. "2.1.3") refer to section numbers in the CAS protocol spec
     # under http://www.ja-sig.org/products/cas/overview/protocol/index.html
     
