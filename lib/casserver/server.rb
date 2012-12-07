@@ -301,9 +301,11 @@ module CASServer
         @template_engine = @template_engine.to_sym
       end
     end
+
     after do
       ActiveRecord::Base.connection_pool.release_connection
     end
+    
     # The #.#.# comments (e.g. "2.1.3") refer to section numbers in the CAS protocol spec
     # under http://www.ja-sig.org/products/cas/overview/protocol/index.html
     
@@ -399,7 +401,12 @@ module CASServer
           render t.error.invalid_submit_to_uri
         end
       else
-        render @template_engine, :login
+        unless @service.blank?
+          $LOG.debug("Redirecting to service url: #{@service}")
+          redirect service_uri_with_param(@service, "lt", @lt), 303
+        else
+          render @template_engine, :login
+        end
       end
     end
 
@@ -507,7 +514,14 @@ module CASServer
         status 401
       end
 
-      render @template_engine, :login
+      unless @service.blank?
+        url = service_uri_with_param(@service, "auth_failure", "true")
+        url = service_uri_with_param(url, "lt", @lt)
+        $LOG.debug("Authentication failure : redirecting to url: #{url}")
+        redirect url, 303
+      else
+        render @template_engine, :login
+      end
     end
 
     get /^#{uri_path}\/?$/ do
