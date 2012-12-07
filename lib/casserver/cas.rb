@@ -247,7 +247,7 @@ module CASServer::CAS
     path = uri.path
     req = Net::HTTP::Post.new(path)
     req.set_form_data('logoutRequest' => %{<samlp:LogoutRequest ID="#{rand}" Version="2.0" IssueInstant="#{time.rfc2822}">
- <saml:NameID></saml:NameID>
+ <saml:NameID>#{st.username}</saml:NameID>
  <samlp:SessionIndex>#{st.ticket}</samlp:SessionIndex>
  </samlp:LogoutRequest>})
  
@@ -274,6 +274,10 @@ module CASServer::CAS
   def service_uri_with_ticket(service, st)
     raise ArgumentError, "Second argument must be a ServiceTicket!" unless st.kind_of? CASServer::Model::ServiceTicket
 
+    service_uri_with_param(service, "ticket", st.ticket)
+  end
+
+  def service_uri_with_param(service, param_name, param_value)
     # This will choke with a URI::InvalidURIError if service URI is not properly URI-escaped...
     # This exception is handled further upstream (i.e. in the controller).
     service_uri = URI.parse(service)
@@ -288,10 +292,9 @@ module CASServer::CAS
       query_separator = "?"
     end
 
-    service_with_ticket = service + query_separator + "ticket=" + st.ticket
+    service_with_ticket = service + query_separator + "#{param_name}=" + param_value
     service_with_ticket
   end
-
   # Strips CAS-related parameters from a service URL and normalizes it,
   # removing trailing / and ?. Also converts any spaces to +.
   #
