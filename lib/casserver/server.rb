@@ -275,6 +275,10 @@ module CASServer
       end
     end
 
+    after do
+      ActiveRecord::Base.clear_active_connections!
+    end
+
     # The #.#.# comments (e.g. "2.1.3") refer to section numbers in the CAS protocol spec
     # under http://www.ja-sig.org/products/cas/overview/protocol/index.html
 
