@@ -749,7 +749,13 @@ module CASServer
       render :builder, :proxy
     end
 
+    get "/db_health" do
+      ActiveRecord::Base.connection.select_value('SELECT 1') == '1' ? 200 : 500
+    end
 
+    get "/health" do
+      status 200
+    end
 
     # Helpers
 
