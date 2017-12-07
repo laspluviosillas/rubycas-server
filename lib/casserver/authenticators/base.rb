@@ -1,3 +1,6 @@
+require 'active_support'
+require 'active_support/core_ext'
+
 module CASServer
   module Authenticators
     class Base
@@ -35,7 +38,7 @@ module CASServer
       end
 
       def extra_attributes
-        @extra_attributes
+        @extra_attributes.stringify_keys
       end
 
       protected

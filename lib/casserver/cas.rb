@@ -2,6 +2,7 @@ require 'uri'
 require 'net/https'
 
 require 'casserver/model'
+require 'casserver/core_ext'
 
 # Encapsulates CAS functionality. This module is meant to be included in
 # the CASServer::Controllers module.
@@ -12,7 +13,7 @@ module CASServer::CAS
   def generate_login_ticket
     # 3.5 (login ticket)
     lt = LoginTicket.new
-    lt.ticket = "LT-" + CASServer::Utils.random_string
+    lt.ticket = "LT-" + String.random
 
     lt.client_hostname = @env['HTTP_X_FORWARDED_FOR'] || @env['REMOTE_HOST'] || @env['REMOTE_ADDR']
     lt.save!
@@ -30,7 +31,7 @@ module CASServer::CAS
   def generate_ticket_granting_ticket(username, extra_attributes = {})
     # 3.6 (ticket granting cookie/ticket)
     tgt = TicketGrantingTicket.new
-    tgt.ticket = "TGC-" + CASServer::Utils.random_string
+    tgt.ticket = "TGC-" + String.random
     tgt.username = username
     tgt.extra_attributes = extra_attributes
     tgt.client_hostname = @env['HTTP_X_FORWARDED_FOR'] || @env['REMOTE_HOST'] || @env['REMOTE_ADDR']
@@ -44,7 +45,7 @@ module CASServer::CAS
   def generate_service_ticket(service, username, tgt)
     # 3.1 (service ticket)
     st = ServiceTicket.new
-    st.ticket = "ST-" + CASServer::Utils.random_string
+    st.ticket = "ST-" + String.random
     st.service = service
     st.username = username
     st.granted_by_tgt_id = tgt.id
@@ -58,11 +59,11 @@ module CASServer::CAS
   def generate_proxy_ticket(target_service, pgt)
     # 3.2 (proxy ticket)
     pt = ProxyTicket.new
-    pt.ticket = "PT-" + CASServer::Utils.random_string
+    pt.ticket = "PT-" + String.random
     pt.service = target_service
     pt.username = pgt.service_ticket.username
     pt.granted_by_pgt_id = pgt.id
-    pt.granted_by_tgt_id = pgt.service_ticket.granted_by_tgt.id
+    pt.granted_by_tgt_id = pgt.service_ticket.granted_by_tgt_id
     pt.client_hostname = @env['HTTP_X_FORWARDED_FOR'] || @env['REMOTE_HOST'] || @env['REMOTE_ADDR']
     pt.save!
     $LOG.debug("Generated proxy ticket '#{pt.ticket}' for target service '#{pt.service}'" +
@@ -86,10 +87,10 @@ module CASServer::CAS
     https.start do |conn|
       path = uri.path.empty? ? '/' : uri.path
       path += '?' + uri.query unless (uri.query.nil? || uri.query.empty?)
-      
+
       pgt = ProxyGrantingTicket.new
-      pgt.ticket = "PGT-" + CASServer::Utils.random_string(60)
-      pgt.iou = "PGTIOU-" + CASServer::Utils.random_string(57)
+      pgt.ticket = "PGT-" + String.random(60)
+      pgt.iou = "PGTIOU-" + String.random(57)
       pgt.service_ticket_id = st.id
       pgt.client_hostname = @env['HTTP_X_FORWARDED_FOR'] || @env['REMOTE_HOST'] || @env['REMOTE_ADDR']
 
@@ -101,7 +102,7 @@ module CASServer::CAS
       response = conn.request_get(path)
       # TODO: follow redirects... 2.5.4 says that redirects MAY be followed
       # NOTE: The following response codes are valid according to the JA-SIG implementation even without following redirects
-      
+
       if %w(200 202 301 302 304).include?(response.code)
         # 3.4 (proxy-granting ticket IOU)
         pgt.save!
@@ -243,18 +244,18 @@ module CASServer::CAS
     uri = URI.parse(st.service)
     uri.path = '/' if uri.path.empty?
     time = Time.now
-    rand = CASServer::Utils.random_string
+    rand = String.random
     path = uri.path
     req = Net::HTTP::Post.new(path)
-    req.set_form_data('logoutRequest' => %{<samlp:LogoutRequest ID="#{rand}" Version="2.0" IssueInstant="#{time.rfc2822}">
- <saml:NameID></saml:NameID>
+    req.set_form_data('logoutRequest' => %{<samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="#{rand}" Version="2.0" IssueInstant="#{time.rfc2822}">
+ <saml:NameID>#{st.username}</saml:NameID>
  <samlp:SessionIndex>#{st.ticket}</samlp:SessionIndex>
  </samlp:LogoutRequest>})
- 
+
     begin
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true if uri.scheme =='https'
-      
+
       http.start do |conn|
         response = conn.request(req)
         if response.kind_of? Net::HTTPSuccess
@@ -274,6 +275,10 @@ module CASServer::CAS
   def service_uri_with_ticket(service, st)
     raise ArgumentError, "Second argument must be a ServiceTicket!" unless st.kind_of? CASServer::Model::ServiceTicket
 
+    service_uri_with_param(service, "ticket", st.ticket)
+  end
+
+  def service_uri_with_param(service, param_name, param_value)
     # This will choke with a URI::InvalidURIError if service URI is not properly URI-escaped...
     # This exception is handled further upstream (i.e. in the controller).
     service_uri = URI.parse(service)
@@ -288,10 +293,16 @@ module CASServer::CAS
       query_separator = "?"
     end
 
-    service_with_ticket = service + query_separator + "ticket=" + st.ticket
+    service_with_ticket = service + query_separator + "#{param_name}=" + param_value
+
+    # HACK: Add timestamp for invalidating old login tickets.
+    # This is because some users bookmark our login page with an old login ticket
+    # which then fails to login. We use this timestamp to validate that the login ticket
+    # being sent to cas is not more than 3 minutes old.
+    service_with_ticket = service_with_ticket + "&timestamp=#{Time.now.to_i}"
+
     service_with_ticket
   end
-
   # Strips CAS-related parameters from a service URL and normalizes it,
   # removing trailing / and ?. Also converts any spaces to +.
   #
@@ -305,7 +316,7 @@ module CASServer::CAS
   def clean_service_url(dirty_service)
     return dirty_service if dirty_service.blank?
     clean_service = dirty_service.dup
-    ['service', 'ticket', 'gateway', 'renew'].each do |p|
+    ['tgt', 'timestamp', 'service', 'ticket', 'gateway', 'renew'].each do |p|
       clean_service.sub!(Regexp.new("&?#{p}=[^&]*"), '')
     end
 
