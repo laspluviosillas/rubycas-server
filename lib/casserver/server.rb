@@ -423,8 +423,10 @@ module CASServer
         @message = {:type => 'mistake', :message => error}
         # generate another login ticket to allow for re-submitting the form
         @lt = generate_login_ticket.ticket
-        status 500
-        return render @template_engine, :login
+        url = service_uri_with_param(@service, "ticket_failure", "true")
+        url = service_uri_with_param(url, "lt", @lt)
+        $LOG.debug("Authentication failure : redirecting to url: #{url}")
+        redirect url, 303
       end
 
       # generate another login ticket to allow for re-submitting the form after a post
